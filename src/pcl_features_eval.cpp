@@ -30,14 +30,31 @@ const double search_radius = 0.03;
 void print_usage(const char* prog_name) {
     std::cout << "\n\nUsage: " << prog_name << " point_cloud_file.pcd [options]\n\n"
         << "options:\n"
-        << "--------------------------------------------------\n"
-        << "[0-9]   method\n"
-        << "-h      this help\n"
-        << "-v      launch viewer\n"
-        << "-o      with original point cloud withoud downsampling\n"
-        << "        [Warning] this could take a long time to calculate...\n"
-        << "-p      print point cloud in terminal\n"
-        << "\n\n";
+        << "------------------------------------------------------------\n"
+        << "-m <0-12>   method (see the list below)\n"
+        << "-d <float>  voxel grid size\n"
+        << "-o          with original point cloud withoud downsampling\n"
+        << "            [Warning] this could take a long time...\n"
+        << "-v          launch viewer\n"
+        << "-p          print point cloud in terminal\n"
+        << "-h          this help\n"
+        << "\n"
+        << "------------------------------------------------------------\n"
+        << "method list:\n"
+        << " 0:  PFH\n"
+        << " 1:  FPFH\n"
+        << " 2:  FPFH_OMP\n"
+        << " 3:  3DSC\n"
+        << " 4:  USC\n"
+        << " 5:  SHOT\n"
+        << " 6:  SHOT_OMP\n"
+        << " 7:  SI\n"
+        << " 8:  VFH\n"
+        << " 9:  CVFH\n"
+        << "10:  OUR_CVFH\n"
+        << "11:  ESF\n"
+        << "12:  GFPFH\n"
+        << "------------------------------------------------------------\n";
 }
 
 boost::shared_ptr<pcl::visualization::PCLVisualizer> cloudViewer (
@@ -95,11 +112,11 @@ void get_normals(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud,
 }
 
 void do_downsampling(pcl::PointCloud<pcl::PointXYZ>::Ptr &in_cloud,
-        pcl::PointCloud<pcl::PointXYZ>::Ptr &out_cloud){
+        pcl::PointCloud<pcl::PointXYZ>::Ptr &out_cloud, float leaf_size = 0.02f){
 
     pcl::VoxelGrid<pcl::PointXYZ> sor;
     sor.setInputCloud(in_cloud);
-    sor.setLeafSize(0.02f, 0.02f, 0.02f);
+    sor.setLeafSize(leaf_size, leaf_size, leaf_size);
     sor.filter(*out_cloud);
 }
 
@@ -448,11 +465,6 @@ int main(int argc, char** argv) {
     std::cout << "Loaded " << cloud->width * cloud->height
         << " data points from " << argv[1] << " ..." << std::endl;
 
-    int method = -1;
-    for (size_t i = 0; i < 15; i++)
-        if (pcl::console::find_argument(argc, argv, boost::to_string(i).c_str()) >= 0) method = i;
-
-
     if (pcl::console::find_argument(argc, argv, "-p") >= 0) {
         for (size_t i = 0; i < cloud->points.size(); ++i)
             std::cout << " " << cloud->points[i].x
@@ -463,13 +475,17 @@ int main(int argc, char** argv) {
 
     std::cout << "point size: " << cloud->points.size() << std::endl;
 
-
     bool downsample = true;
     if (pcl::console::find_argument(argc, argv, "-o") >= 0)
         downsample = false;
 
-    if (downsample){ //with originaldownsample
-        do_downsampling(cloud, cloud_);
+    if (downsample){
+        float leaf_size;
+        if (pcl::console::parse(argc, argv, "-d", leaf_size) >= 0)
+            do_downsampling(cloud, cloud_, leaf_size);
+        else
+            do_downsampling(cloud, cloud_);
+
         get_normals(cloud_, normals_);
         std::cout << "reduced point size: " << cloud_->points.size() << std::endl;
     } else {
@@ -478,6 +494,10 @@ int main(int argc, char** argv) {
         *cloud_ = *cloud;
         *normals_ = *normals;
     }
+
+    int method = 0;
+    if (pcl::console::parse(argc, argv, "-m", method) < 0)
+        method = -1; //run all methods
 
     switch (method) {
         case 0:
