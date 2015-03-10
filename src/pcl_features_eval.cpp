@@ -16,12 +16,14 @@
 #include <pcl/features/shot.h>
 #include <pcl/features/shot_omp.h>
 #include <pcl/features/spin_image.h>
+#include <pcl/range_image/range_image_planar.h>
+#include <pcl/visualization/range_image_visualizer.h>
 #include <pcl/features/vfh.h>
 #include <pcl/features/cvfh.h>
 #include <pcl/features/our_cvfh.h>
 #include <pcl/features/esf.h>
 #include <pcl/features/gfpfh.h>
-#include<pcl/visualization/pcl_plotter.h>
+#include <pcl/visualization/pcl_plotter.h>
 #include <pcl/visualization/cloud_viewer.h>
 #include <pcl/console/parse.h>
 
@@ -31,7 +33,7 @@ void print_usage(const char* prog_name) {
     std::cout << "\n\nUsage: " << prog_name << " point_cloud_file.pcd [options]\n\n"
         << "options:\n"
         << "------------------------------------------------------------\n"
-        << "-m <0-12>   method (see the list below)\n"
+        << "-m <0-13>   method (see the list below)\n"
         << "-d <float>  voxel grid size\n"
         << "-o          with original point cloud withoud downsampling\n"
         << "            [Warning] this could take a long time...\n"
@@ -49,11 +51,12 @@ void print_usage(const char* prog_name) {
         << " 5:  SHOT\n"
         << " 6:  SHOT_OMP\n"
         << " 7:  SI\n"
-        << " 8:  VFH\n"
-        << " 9:  CVFH\n"
-        << "10:  OUR_CVFH\n"
-        << "11:  ESF\n"
-        << "12:  GFPFH\n"
+        << " 8:  NARF\n"
+        << " 9:  VFH\n"
+        << "10:  CVFH\n"
+        << "11:  OUR_CVFH\n"
+        << "12:  ESF\n"
+        << "13:  GFPFH\n"
         << "------------------------------------------------------------\n";
 }
 
@@ -324,6 +327,88 @@ void do_SI(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud,
     std::cout << "processing time: " << std::fixed << std::setw(10) << std::setprecision(3) << std::right << (now-last)*1000. << " ms\n";
 }
 
+#if 0
+void get_range_image(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
+    Eigen::Affine3f scene_sensor_pose(Eigen::Affine3f::Identity());
+
+    scene_sensor_pose = Eigen::Affine3f(Eigen::Translation3f(
+                cloud->sensor_origin_[0],
+                cloud->sensor_origin_[1],
+                cloud->sensor_origin_[2])) *
+        Eigen::Affine3f(cloud->sensor_orientation_);
+
+    //-- create range image from the cloud
+    float noise_level = 0.0f;
+    float min_range = 0.0f;
+    int border_size = 1;
+    boost::shared_ptr<pcl::RangeImage> range_image(new pcl::RangeImage);
+    //pcl::RangeImage& range_image = *range_image_ptr;
+
+
+    // --------------------
+    // -----Parameters-----
+    // --------------------
+    float angular_resolution_x = 0.5f,
+          angular_resolution_y = angular_resolution_x;
+    angular_resolution_x = pcl::deg2rad (angular_resolution_x);
+    angular_resolution_y = pcl::deg2rad (angular_resolution_y);
+    pcl::RangeImage::CoordinateFrame coordinate_frame = pcl::RangeImage::CAMERA_FRAME;
+    bool live_update = false;
+
+    range_image->createFromPointCloud(*cloud, angular_resolution_x, angular_resolution_y,
+            pcl::deg2rad(360.0f), pcl::deg2rad(180.0f),
+            scene_sensor_pose, coordinate_frame, noise_level, min_range, border_size);
+
+
+    //-- visualization
+    pcl::visualization::RangeImageVisualizer viewer ("Range image");
+    viewer.showRangeImage (*range_image);
+    while (!viewer.wasStopped()) {
+        viewer.spinOnce();
+        pcl_sleep(0.1);
+    }
+}
+#endif
+
+void get_range_image(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
+    float image_size_x = 640; //cloud->width;
+    float image_size_y = 480; //cloud->height;
+
+    float center_x = image_size_x * 0.5f;
+    float center_y = image_size_y * 0.5f;
+    float focal_length_x = 200.0f; //todo
+    float focal_length_y = focal_length_x;
+
+    Eigen::Affine3f scene_sensor_pose = Eigen::Affine3f(Eigen::Translation3f(
+                cloud->sensor_origin_[0],
+                cloud->sensor_origin_[1],
+                cloud->sensor_origin_[2])) *
+        Eigen::Affine3f(cloud->sensor_orientation_);
+
+    pcl::RangeImage::CoordinateFrame coordinate_frame = pcl::RangeImage::CAMERA_FRAME;
+    float noise_level = 0.0f;
+    float min_range = 0.0f;
+
+    pcl::RangeImagePlanar range_image;
+    range_image.createFromPointCloudWithFixedSize(
+            *cloud, image_size_x, image_size_y,
+            center_x, center_y, focal_length_x, focal_length_y,
+            scene_sensor_pose, coordinate_frame,
+            noise_level, min_range);
+
+    //-- visualization
+    pcl::visualization::RangeImageVisualizer viewer("planar range image");
+    viewer.showRangeImage(range_image);
+    while (!viewer.wasStopped()) {
+        viewer.spinOnce();
+        pcl_sleep(0.1);
+    }
+}
+
+void do_NARF(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
+    get_range_image(cloud);
+}
+
 //-- Global features
 void do_VFH(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud,
         pcl::PointCloud<pcl::Normal>::Ptr &normals) {
@@ -495,6 +580,7 @@ int main(int argc, char** argv) {
         *normals_ = *normals;
     }
 
+
     int method = 0;
     if (pcl::console::parse(argc, argv, "-m", method) < 0)
         method = -1; //run all methods
@@ -525,18 +611,21 @@ int main(int argc, char** argv) {
             do_SI(cloud_, normals_);
             break;
         case 8:
-            do_VFH(cloud_, normals_);
+            do_NARF(cloud_);
             break;
         case 9:
-            do_CVFH(cloud_, normals_);
+            do_VFH(cloud_, normals_);
             break;
         case 10:
-            do_OUR_CVFH(cloud_, normals_);
+            do_CVFH(cloud_, normals_);
             break;
         case 11:
-            do_ESF(cloud_);
+            do_OUR_CVFH(cloud_, normals_);
             break;
         case 12:
+            do_ESF(cloud_);
+            break;
+        case 13:
             do_GFPFH(cloud_);
             break;
         default: // run all methods
@@ -548,6 +637,7 @@ int main(int argc, char** argv) {
             //do_SHOT(cloud_, normals_);
             //do_SHOT_OMP(cloud_, normals_);
             do_SI(cloud_, normals_);
+            do_NARF(cloud_);
             do_VFH(cloud_, normals_);
             do_CVFH(cloud_, normals_);
             do_OUR_CVFH(cloud_, normals_);
