@@ -17,6 +17,7 @@
 #include <pcl/features/shot_omp.h>
 #include <pcl/features/spin_image.h>
 #include <pcl/range_image/range_image_planar.h>
+#include <pcl/features/range_image_border_extractor.h>
 #include <pcl/visualization/range_image_visualizer.h>
 #include <pcl/features/vfh.h>
 #include <pcl/features/cvfh.h>
@@ -370,7 +371,8 @@ void get_range_image(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
 }
 #endif
 
-void get_range_image(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
+void get_range_image(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud,
+      pcl::RangeImagePlanar& range_image) {
     float image_size_x = 640; //cloud->width;
     float image_size_y = 480; //cloud->height;
 
@@ -389,13 +391,13 @@ void get_range_image(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
     float noise_level = 0.0f;
     float min_range = 0.0f;
 
-    pcl::RangeImagePlanar range_image;
+    //pcl::RangeImagePlanar range_image;
     range_image.createFromPointCloudWithFixedSize(
             *cloud, image_size_x, image_size_y,
             center_x, center_y, focal_length_x, focal_length_y,
             scene_sensor_pose, coordinate_frame,
             noise_level, min_range);
-
+#if 0
     //-- visualization
     pcl::visualization::RangeImageVisualizer viewer("planar range image");
     viewer.showRangeImage(range_image);
@@ -403,10 +405,30 @@ void get_range_image(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
         viewer.spinOnce();
         pcl_sleep(0.1);
     }
+#endif
 }
 
 void do_NARF(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
-    get_range_image(cloud);
+    //-- get range image
+    pcl::RangeImagePlanar range_image;
+    get_range_image(cloud, range_image);
+
+    //--find borders
+    pcl::RangeImageBorderExtractor border_extractor(&range_image);
+    pcl::PointCloud<pcl::BorderDescription>::Ptr borders(\
+            new pcl::PointCloud<pcl::BorderDescription>);
+    border_extractor.compute(*borders);
+
+    pcl::visualization::RangeImageVisualizer* viewer = NULL;
+    viewer = pcl::visualization::RangeImageVisualizer::getRangeImageBordersWidget(range_image,
+            -std::numeric_limits<float>::infinity(),
+            std::numeric_limits<float>::infinity(),
+            false, *borders, "Borders");
+    while (!viewer->wasStopped()) {
+        viewer->spinOnce();
+        pcl_sleep(0.1);
+    }
+
 }
 
 //-- Global features
