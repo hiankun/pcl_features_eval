@@ -18,6 +18,8 @@
 #include <pcl/features/spin_image.h>
 #include <pcl/range_image/range_image_planar.h>
 #include <pcl/features/range_image_border_extractor.h>
+#include <pcl/keypoints/narf_keypoint.h>
+#include <pcl/features/narf_descriptor.h>
 #include <pcl/visualization/range_image_visualizer.h>
 #include <pcl/features/vfh.h>
 #include <pcl/features/cvfh.h>
@@ -57,7 +59,7 @@ void print_usage(const char* prog_name) {
         << "10:  CVFH\n"
         << "11:  OUR_CVFH\n"
         << "12:  ESF\n"
-        << "13:  GFPFH\n"
+        << "13:  GFPFH [might take a very long time]\n"
         << "------------------------------------------------------------\n";
 }
 
@@ -409,25 +411,76 @@ void get_range_image(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud,
 }
 
 void do_NARF(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
+    std::cout << std::setw(40) << std::left << "[NARF preprocessing]...";
+    double last = pcl::getTime();
     //-- get range image
     pcl::RangeImagePlanar range_image;
     get_range_image(cloud, range_image);
 
-    //--find borders
+    //-- find borders
     pcl::RangeImageBorderExtractor border_extractor(&range_image);
     pcl::PointCloud<pcl::BorderDescription>::Ptr borders(\
             new pcl::PointCloud<pcl::BorderDescription>);
     border_extractor.compute(*borders);
 
+    //-- get keypoints
+    pcl::NarfKeypoint detector(&border_extractor);
+    detector.setRangeImage(&range_image);
+    float sprt_size = 0.2f; //todo
+    detector.getParameters().support_size = sprt_size;//todo
+    pcl::PointCloud<int>::Ptr keypoints(new pcl::PointCloud<int>);
+    detector.compute(*keypoints);
+
+    double now = pcl::getTime();
+    std::cout << "[preprocessing time]: " << std::fixed << std::setw(10) << std::setprecision(3) << std::right << (now-last)*1000. << " ms\n";
+
+    //-- calculate features
+    std::vector<int> kps;
+    kps.resize(keypoints->points.size());
+    for (unsigned int i = 0; i < keypoints->size(); ++i)
+        kps[i] = keypoints->points[i];
+
+    pcl::NarfDescriptor narf(&range_image, &kps);
+    narf.getParameters().support_size = sprt_size;
+    narf.getParameters().rotation_invariant = true;
+
+    pcl::PointCloud<pcl::Narf36>::Ptr descriptors(new pcl::PointCloud<pcl::Narf36>);
+
+    std::cout << std::setw(40) << std::left << "calculating NARF features...";
+    last = pcl::getTime();
+    narf.compute(*descriptors);
+    now = pcl::getTime();
+    std::cout << "processing time: " << std::fixed << std::setw(10) << std::setprecision(3) << std::right << (now-last)*1000. << " ms\n";
+
+#if 0
+    //-- viewer for borders
     pcl::visualization::RangeImageVisualizer* viewer = NULL;
     viewer = pcl::visualization::RangeImageVisualizer::getRangeImageBordersWidget(range_image,
             -std::numeric_limits<float>::infinity(),
             std::numeric_limits<float>::infinity(),
             false, *borders, "Borders");
+
     while (!viewer->wasStopped()) {
         viewer->spinOnce();
         pcl_sleep(0.1);
     }
+#endif
+
+#if 0
+    //-- viewer for keypoints
+    pcl::visualization::RangeImageVisualizer viewer("NARF keypoints");
+    viewer.showRangeImage(range_image);
+    for (size_t i = 0; i < keypoints->points.size(); ++i) {
+        viewer.markPoint(keypoints->points[i] % range_image.width,
+                keypoints->points[i]/range_image.width,
+                pcl::visualization::Vector3ub(1.0f,0.0f,0.0f));
+    }
+
+    while (!viewer.wasStopped()) {
+        viewer.spinOnce();
+        pcl_sleep(0.1);
+    }
+#endif
 
 }
 
@@ -654,9 +707,9 @@ int main(int argc, char** argv) {
             do_PFH(cloud_, normals_);
             do_FPFH(cloud_, normals_);
             do_FPFH_OMP(cloud_, normals_);
-            //do_3DSC(cloud_, normals_); //failed in some pcd files
+            //do_3DSC(cloud_, normals_); //failed with many pcd files
             do_USC(cloud_);
-            //do_SHOT(cloud_, normals_);
+            //do_SHOT(cloud_, normals_); //too sensitive
             //do_SHOT_OMP(cloud_, normals_);
             do_SI(cloud_, normals_);
             do_NARF(cloud_);
@@ -664,7 +717,7 @@ int main(int argc, char** argv) {
             do_CVFH(cloud_, normals_);
             do_OUR_CVFH(cloud_, normals_);
             do_ESF(cloud_);
-            do_GFPFH(cloud_);
+            //do_GFPFH(cloud_); //too slow
             break;
     }
 
